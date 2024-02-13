@@ -1,0 +1,55 @@
+import type { Parser } from "Json/Parse"
+
+import type { MessageEvent } from "./Message"
+import type { RegisteredEvent } from "./Registered"
+import type { SignInEvent } from "./SignIn"
+
+import { Left, fromRight } from "Either"
+import JsonParser from "Json/Parse"
+
+import { parseMessageEvent } from "./Message"
+import { parseRegisteredEvent } from "./Registered"
+import { parseSignInEvent } from "./SignIn"
+
+
+
+export type Event
+  = SignInEvent(SignInEvent)
+  | RegisteredEvent(RegisteredEvent)
+  | MessageEvent(MessageEvent)
+  | BadEvent
+
+
+eventTypeParser :: Parser String
+eventTypeParser = JsonParser.field("eventType", JsonParser.string)
+
+
+parseEvent :: String -> Event
+export parseEvent = (event) => pipe(
+  JsonParser.parse(eventTypeParser),
+  chain(
+    where {
+      "SIGN_IN" =>
+        pipe(
+          parseSignInEvent,
+          map(SignInEvent),
+        )(event)
+
+      "REGISTERED" =>
+        pipe(
+          parseRegisteredEvent,
+          map(RegisteredEvent),
+        )(event)
+
+      "MESSAGE" =>
+        pipe(
+          parseMessageEvent,
+          map(MessageEvent),
+        )(event)
+
+      _ =>
+        Left("")
+    },
+  ),
+  fromRight(BadEvent),
+)(event)

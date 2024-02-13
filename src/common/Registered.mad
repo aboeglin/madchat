@@ -1,0 +1,22 @@
+import type { Either } from "Either"
+
+import JsonParser from "Json/Parse"
+
+
+
+export alias RegisteredEvent = { eventType :: String, userId :: Integer }
+
+printRegisteredEvent :: Integer -> String
+export printRegisteredEvent = (socketId) => `{ "eventType": "REGISTERED", "userId": ${
+  show(socketId)
+} }`
+
+parseRegisteredEvent :: String -> Either String RegisteredEvent
+export parseRegisteredEvent = (event) => JsonParser.parse(
+  JsonParser.map2(
+    (eventType, userId) => ({ eventType, userId }),
+    JsonParser.field("eventType", JsonParser.string),
+    JsonParser.field("userId", JsonParser.integer),
+  ),
+  event,
+)

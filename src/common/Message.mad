@@ -1,0 +1,30 @@
+import type { Either } from "Either"
+
+import JsonParser from "Json/Parse"
+import JsonPrinter from "Json/Print"
+
+
+
+export alias MessageEvent = { author :: String, content :: String, eventType :: String }
+
+
+printMessageEvent :: MessageEvent -> String
+export printMessageEvent = (event) => pipe(
+  JsonPrinter.object,
+  JsonPrinter.printJson(80),
+)([
+  #["eventType", JsonPrinter.string(event.eventType)],
+  #["author", JsonPrinter.string(event.author)],
+  #["content", JsonPrinter.string(event.content)],
+])
+
+parseMessageEvent :: String -> Either String MessageEvent
+export parseMessageEvent = (event) => JsonParser.parse(
+  JsonParser.map3(
+    (eventType, author, content) => ({ eventType, author, content }),
+    JsonParser.field("eventType", JsonParser.string),
+    JsonParser.field("author", JsonParser.string),
+    JsonParser.field("content", JsonParser.string),
+  ),
+  event,
+)

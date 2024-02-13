@@ -1,0 +1,191 @@
+import type { WebSocket } from "MadWebSocketClient"
+
+import ByteArray from "ByteArray"
+import { Done, Loop } from "Function"
+import IO from "IO"
+import Process from "Process"
+import String from "String"
+import Terminal from "Terminal"
+import Wish from "Wish"
+
+import WebSocket from "MadWebSocketClient"
+
+import { MessageEvent, RegisteredEvent, parseEvent } from "../common/Event"
+import { printMessageEvent } from "../common/Message"
+import { printSignInEvent } from "../common/SignIn"
+
+
+
+noop = () => {}
+
+saveCursor :: {} -> {}
+saveCursor = () => IO.put("\x1b7")
+
+restoreCursor :: {} -> {}
+restoreCursor = () => IO.put("\x1b8")
+
+eraseAfter :: {} -> {}
+eraseAfter = () => IO.put("\x1b[0J")
+
+
+#-
+import readline from "readline";
+
+readline.emitKeypressEvents(process.stdin);
+
+if (process.stdin.isTTY) process.stdin.setRawMode(true);
+-#
+
+registerKeyPress :: (String -> {}) -> {}
+registerKeyPress = (cb) => #- {
+  process.stdin.on("keypress", (chunk, key) => {
+    // console.log(key)
+    cb(key.sequence);
+  });
+} -#
+
+getChar :: {} -> String
+getChar = () => #- {
+  let buffer = Buffer.alloc(1)
+  fs.readSync(0, buffer, 0, 1)
+  return buffer.toString('utf8')
+} -#
+
+makeBuffer :: {}
+  -> { get :: {} -> String, pop :: {} -> {}, push :: String -> {}, reset :: {} -> {} }
+makeBuffer = () => {
+  data = ""
+
+  return {
+    push: (char) => {
+      data = data ++ char
+    },
+    get: () => data,
+    reset: () => {
+      data = ""
+    },
+    pop: () => {
+      data = String.dropLast(1, data)
+    },
+  }
+}
+
+buffer = makeBuffer()
+
+loop2 :: WebSocket -> String -> {}
+loop2 = (ws, author) => {
+  saveCursor()
+  IO.put("> ")
+  registerKeyPress(
+    (char) => {
+      if (char == "\r") do {
+        if (buffer.get() != "") do {
+          WebSocket.send(
+            ByteArray.fromString(
+              printMessageEvent({ eventType: "MESSAGE", author, content: buffer.get() }),
+            ),
+            ws,
+          )
+          buffer.reset()
+        }
+      } else {
+        if (char == "\x03") do { Process.exit(0) } else {
+          if (char == "\x7F") do {
+            buffer.pop()
+            restoreCursor()
+            eraseAfter()
+            IO.put("> ")
+            IO.put(buffer.get())
+          } else do {
+            IO.put(char)
+            buffer.push(char)
+          }
+        }
+      }
+    },
+  )
+}
+
+
+loop :: WebSocket -> Integer -> {}
+loop = (ws, userId) => {
+  IO.putLine(`connected with user id: ${show(userId)}`)
+
+  Wish.fulfill(
+    noop,
+    noop,
+    tailRecM(
+      () => do {
+        IO.put("> ")
+        l <- IO.getLine
+        WebSocket.send(
+          ByteArray.fromString(printMessageEvent({ eventType: "MESSAGE", author: "", content: l })),
+          ws,
+        )
+        return of(Loop({}))
+      },
+      {},
+    ),
+  )
+}
+
+
+main = (args) => {
+  // saveCursor()
+  // IO.putLine("Hello")
+  // restoreCursor()
+  // IO.putLine("h")
+  where(args) {
+    [_, name] =>
+      do {
+        ws = WebSocket.connect("ws:/localhost:3000/path")
+        WebSocket.onError(
+          pipe(
+            .code,
+            IO.putLine,
+          ),
+          ws,
+        )
+        WebSocket.onConnected(
+          () => {
+            pipe(
+              (pseudo) => ({ pseudo, eventType: "SIGN_IN" }),
+              printSignInEvent,
+              ByteArray.fromString,
+              WebSocket.send($, ws),
+            )(name)
+          },
+          ws,
+        )
+        WebSocket.onDisconnected(() => { IO.putLine("Connection lost") }, ws)
+        WebSocket.onMessage(
+          pipe(
+            ByteArray.toString,
+            parseEvent,
+            where {
+              RegisteredEvent({ userId }) =>
+                loop2(ws, name)
+
+              // loop(ws, userId)
+
+              MessageEvent({ author, content }) =>
+                do {
+                  restoreCursor()
+                  IO.putLine(`${Terminal.text.brightCyan(author)}: ${content}`)
+                  saveCursor()
+                  IO.put("> ")
+                  IO.put(buffer.get())
+                }
+
+              _ =>
+                {}
+            },
+          ),
+          ws,
+        )
+      }
+
+    _ =>
+      IO.errLine("Bad input")
+  }
+}

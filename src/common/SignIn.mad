@@ -1,0 +1,27 @@
+import type { Either } from "Either"
+
+import JsonParser from "Json/Parse"
+import JsonPrinter from "Json/Print"
+
+
+
+export alias SignInEvent = { eventType :: String, pseudo :: String }
+
+printSignInEvent :: SignInEvent -> String
+export printSignInEvent = (event) => pipe(
+  JsonPrinter.object,
+  JsonPrinter.printJson(80),
+)([
+  #["eventType", JsonPrinter.string(event.eventType)],
+  #["pseudo", JsonPrinter.string(event.pseudo)],
+])
+
+parseSignInEvent :: String -> Either String SignInEvent
+export parseSignInEvent = (event) => JsonParser.parse(
+  JsonParser.map2(
+    (eventType, pseudo) => ({ eventType, pseudo }),
+    JsonParser.field("eventType", JsonParser.string),
+    JsonParser.field("pseudo", JsonParser.string),
+  ),
+  event,
+)

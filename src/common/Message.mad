@@ -5,7 +5,12 @@ import JsonPrinter from "Json/Print"
 
 
 
-export alias MessageEvent = { author :: String, content :: String, eventType :: String }
+export alias MessageEvent = {
+  author :: String,
+  authorId :: Integer,
+  content :: String,
+  eventType :: String,
+}
 
 
 printMessageEvent :: MessageEvent -> String
@@ -15,16 +20,18 @@ export printMessageEvent = (event) => pipe(
 )([
   #["eventType", JsonPrinter.string(event.eventType)],
   #["author", JsonPrinter.string(event.author)],
+  #["authorId", JsonPrinter.integer(event.authorId)],
   #["content", JsonPrinter.string(event.content)],
 ])
 
 parseMessageEvent :: String -> Either String MessageEvent
 export parseMessageEvent = (event) => JsonParser.parse(
-  JsonParser.map3(
-    (eventType, author, content) => ({ eventType, author, content }),
+  JsonParser.map4(
+    (eventType, author, content, authorId) => ({ eventType, author, content, authorId }),
     JsonParser.field("eventType", JsonParser.string),
     JsonParser.field("author", JsonParser.string),
     JsonParser.field("content", JsonParser.string),
+    JsonParser.field("authorId", JsonParser.integer),
   ),
   event,
 )

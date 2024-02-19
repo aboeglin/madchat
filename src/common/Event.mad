@@ -3,6 +3,7 @@ import type { Parser } from "Json/Parse"
 import type { MessageEvent } from "./Message"
 import type { RegisteredEvent } from "./Registered"
 import type { SignInEvent } from "./SignIn"
+import type { UserAccessEvent } from "./UserAccess"
 
 import { Left, fromRight } from "Either"
 import JsonParser from "Json/Parse"
@@ -10,12 +11,15 @@ import JsonParser from "Json/Parse"
 import { parseMessageEvent } from "./Message"
 import { parseRegisteredEvent } from "./Registered"
 import { parseSignInEvent } from "./SignIn"
+import { parseUserAccessEvent } from "./UserAccess"
 
 
 
 export type Event
   = SignInEvent(SignInEvent)
   | RegisteredEvent(RegisteredEvent)
+  | UserJoinedEvent(UserAccessEvent)
+  | UserLeftEvent(UserAccessEvent)
   | MessageEvent(MessageEvent)
   | BadEvent
 
@@ -39,6 +43,18 @@ export parseEvent = (event) => pipe(
         pipe(
           parseRegisteredEvent,
           map(RegisteredEvent),
+        )(event)
+
+      "USER_JOINED" =>
+        pipe(
+          parseUserAccessEvent,
+          map(UserJoinedEvent),
+        )(event)
+
+      "USER_LEFT" =>
+        pipe(
+          parseUserAccessEvent,
+          map(UserLeftEvent),
         )(event)
 
       "MESSAGE" =>

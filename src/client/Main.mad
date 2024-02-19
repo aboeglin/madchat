@@ -1,55 +1,35 @@
 import type { WebSocket } from "MadWebSocketClient"
 
 import ByteArray from "ByteArray"
-import { Done, Loop } from "Function"
 import IO from "IO"
+import List from "List"
+import Math from "Math"
+import Maybe from "Maybe"
 import Process from "Process"
 import String from "String"
 import Terminal from "Terminal"
-import Wish from "Wish"
 
 import WebSocket from "MadWebSocketClient"
 
-import { MessageEvent, RegisteredEvent, parseEvent } from "../common/Event"
-import { printMessageEvent } from "../common/Message"
-import { printSignInEvent } from "../common/SignIn"
+import { getSubnetIpRange } from "@/client/IP"
+import {
+  eraseAfterCursor,
+  registerKeyPress,
+  restoreCursor,
+  saveCursor,
+  setTimeout,
+} from "@/client/Misc"
+import {
+  MessageEvent,
+  RegisteredEvent,
+  UserJoinedEvent,
+  UserLeftEvent,
+  parseEvent,
+} from "@/common/Event"
+import { printMessageEvent } from "@/common/Message"
+import { printSignInEvent } from "@/common/SignIn"
 
 
-
-noop = () => {}
-
-saveCursor :: {} -> {}
-saveCursor = () => IO.put("\x1b7")
-
-restoreCursor :: {} -> {}
-restoreCursor = () => IO.put("\x1b8")
-
-eraseAfter :: {} -> {}
-eraseAfter = () => IO.put("\x1b[0J")
-
-
-#-
-import readline from "readline";
-
-readline.emitKeypressEvents(process.stdin);
-
-if (process.stdin.isTTY) process.stdin.setRawMode(true);
--#
-
-registerKeyPress :: (String -> {}) -> {}
-registerKeyPress = (cb) => #- {
-  process.stdin.on("keypress", (chunk, key) => {
-    // console.log(key)
-    cb(key.sequence);
-  });
-} -#
-
-getChar :: {} -> String
-getChar = () => #- {
-  let buffer = Buffer.alloc(1)
-  fs.readSync(0, buffer, 0, 1)
-  return buffer.toString('utf8')
-} -#
 
 makeBuffer :: {}
   -> { get :: {} -> String, pop :: {} -> {}, push :: String -> {}, reset :: {} -> {} }
@@ -72,8 +52,8 @@ makeBuffer = () => {
 
 buffer = makeBuffer()
 
-loop2 :: WebSocket -> String -> {}
-loop2 = (ws, author) => {
+loop :: WebSocket -> String -> Integer -> {}
+loop = (ws, author, userId) => {
   saveCursor()
   IO.put("> ")
   registerKeyPress(
@@ -82,7 +62,12 @@ loop2 = (ws, author) => {
         if (buffer.get() != "") do {
           WebSocket.send(
             ByteArray.fromString(
-              printMessageEvent({ eventType: "MESSAGE", author, content: buffer.get() }),
+              printMessageEvent({
+                eventType: "MESSAGE",
+                author,
+                content: buffer.get(),
+                authorId: userId,
+              }),
             ),
             ws,
           )
@@ -93,12 +78,16 @@ loop2 = (ws, author) => {
           if (char == "\x7F") do {
             buffer.pop()
             restoreCursor()
-            eraseAfter()
+            eraseAfterCursor()
             IO.put("> ")
             IO.put(buffer.get())
-          } else do {
-            IO.put(char)
-            buffer.push(char)
+          } else {
+            if (char == "\x1B[A" || char == "\x1B[B" || char == "\x1B[C" || char == "\x1B[D") {
+              {}
+            } else do {
+              IO.put(char)
+              buffer.push(char)
+            }
           }
         }
       }
@@ -107,82 +96,140 @@ loop2 = (ws, author) => {
 }
 
 
-loop :: WebSocket -> Integer -> {}
-loop = (ws, userId) => {
-  IO.putLine(`connected with user id: ${show(userId)}`)
+AVAILABLE_COLORS :: List (String -> String)
+AVAILABLE_COLORS = [
+  Terminal.text.brightCyan,
+  Terminal.text.brightRed,
+  Terminal.text.brightYellow,
+  Terminal.text.brightGreen,
+  Terminal.text.brightMagenta,
+  Terminal.text.brightBlue,
+]
 
-  Wish.fulfill(
-    noop,
-    noop,
-    tailRecM(
-      () => do {
-        IO.put("> ")
-        l <- IO.getLine
-        WebSocket.send(
-          ByteArray.fromString(printMessageEvent({ eventType: "MESSAGE", author: "", content: l })),
-          ws,
-        )
-        return of(Loop({}))
-      },
-      {},
-    ),
-  )
+
+pickColorById :: Integer -> String -> String
+pickColorById = (id) => pipe(
+  List.length,
+  Math.mod(id),
+  List.nth($, AVAILABLE_COLORS),
+  Maybe.fromMaybe(Terminal.text.brightCyan),
+)(AVAILABLE_COLORS)
+
+
+
+
+
+tryUrls :: String -> List String -> {}
+tryUrls = (name, urls) => where(urls) {
+  [url, ...next] =>
+    do {
+      hasFailed = false
+      hasConnected = false
+      ws = WebSocket.connect(url)
+
+      setTimeout(() => { if (!hasConnected) { WebSocket.disconnect(ws) } }, 50)
+
+      WebSocket.onError(
+        pipe(
+          .code,
+          (code) => {
+            if (
+              code
+                == "ECONNREFUSED"
+                || code
+                == "EACCES"
+                || code
+                == "ETIMEDOUT"
+                || code
+                == "EHOSTDOWN"
+                || code
+                == "EHOSTUNREACH"
+                || code
+                == #- undefined -#
+            ) do {
+              hasFailed = true
+              tryUrls(name, next)
+            } else { IO.errLine(code) }
+          },
+        ),
+        ws,
+      )
+      WebSocket.onConnected(
+        () => {
+          hasConnected = true
+          pipe(
+            (pseudo) => ({ pseudo, eventType: "SIGN_IN" }),
+            printSignInEvent,
+            ByteArray.fromString,
+            WebSocket.send($, ws),
+          )(name)
+        },
+        ws,
+      )
+      WebSocket.onDisconnected(() => { if (!hasFailed) { IO.putLine("Connection lost") } }, ws)
+      WebSocket.onMessage(
+        pipe(
+          ByteArray.toString,
+          parseEvent,
+          where {
+            RegisteredEvent({ userId }) =>
+              do {
+                IO.putLine(Terminal.text.brightBlack("You are connected!"))
+                loop(ws, name, userId)
+              }
+
+            MessageEvent({ author, authorId, content }) =>
+              do {
+                colorFn = pickColorById(authorId)
+                restoreCursor()
+                IO.putLine(`${colorFn(author)}: ${content}`)
+                saveCursor()
+                IO.put("> ")
+                IO.put(buffer.get())
+              }
+
+            UserJoinedEvent({ author, userId }) =>
+              do {
+                colorFn = pickColorById(userId)
+                restoreCursor()
+                IO.putLine(`${colorFn(author)} ${Terminal.text.brightBlack("joined the chatroom")}`)
+                saveCursor()
+                IO.put("> ")
+                IO.put(buffer.get())
+              }
+
+            UserLeftEvent({ author, userId }) =>
+              do {
+                colorFn = pickColorById(userId)
+                restoreCursor()
+                IO.putLine(`${colorFn(author)} ${Terminal.text.brightBlack("left the chatroom")}`)
+                saveCursor()
+                IO.put("> ")
+                IO.put(buffer.get())
+              }
+
+            _ =>
+              {}
+          },
+        ),
+        ws,
+      )
+    }
+
+  [] =>
+    IO.errLine("No server found")
 }
 
 
 main = (args) => {
-  // saveCursor()
-  // IO.putLine("Hello")
-  // restoreCursor()
-  // IO.putLine("h")
   where(args) {
     [_, name] =>
       do {
-        ws = WebSocket.connect("ws:/localhost:3000/path")
-        WebSocket.onError(
-          pipe(
-            .code,
-            IO.putLine,
-          ),
-          ws,
-        )
-        WebSocket.onConnected(
-          () => {
-            pipe(
-              (pseudo) => ({ pseudo, eventType: "SIGN_IN" }),
-              printSignInEvent,
-              ByteArray.fromString,
-              WebSocket.send($, ws),
-            )(name)
-          },
-          ws,
-        )
-        WebSocket.onDisconnected(() => { IO.putLine("Connection lost") }, ws)
-        WebSocket.onMessage(
-          pipe(
-            ByteArray.toString,
-            parseEvent,
-            where {
-              RegisteredEvent({ userId }) =>
-                loop2(ws, name)
-
-              // loop(ws, userId)
-
-              MessageEvent({ author, content }) =>
-                do {
-                  restoreCursor()
-                  IO.putLine(`${Terminal.text.brightCyan(author)}: ${content}`)
-                  saveCursor()
-                  IO.put("> ")
-                  IO.put(buffer.get())
-                }
-
-              _ =>
-                {}
-            },
-          ),
-          ws,
-        )
+        IO.putLine(Terminal.text.brightBlack("Looking for a server.."))
+        pipe(
+          map((ip) => `ws://${ip}:3000/path`),
+          tryUrls(name),
+        )(getSubnetIpRange())
       }
 
     _ =>

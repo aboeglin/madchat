@@ -1,22 +1,30 @@
+import type { Maybe } from "Maybe"
+
 import type { WebSocket } from "MadServer"
 
 import ByteArray from "ByteArray"
 import IO from "IO"
 import List from "List"
-import { Nothing } from "Maybe"
+import { Just, Nothing } from "Maybe"
 import Terminal from "Terminal"
 
 import Server from "MadServer"
 
 import { MessageEvent, SignInEvent, parseEvent } from "../common/Event"
 import { printRegisteredEvent } from "../common/Registered"
+import { printUserAccessEvent } from "../common/UserAccess"
 
 
 
 alias User = { pseudo :: String, socket :: WebSocket, socketId :: Integer }
 
-makeUserStore :: a
-  -> { addUser :: User -> {}, getUsers :: {} -> List User, removeUser :: Integer -> {} }
+makeUserStore :: {}
+  -> {
+    addUser :: User -> {},
+    findUser :: Integer -> Maybe User,
+    getUsers :: {} -> List User,
+    removeUser :: Integer -> {},
+  }
 makeUserStore = () => {
   users = []
 
@@ -28,6 +36,7 @@ makeUserStore = () => {
       users = List.filter((user) => user.socketId != socketId, users)
     },
     getUsers: () => users,
+    findUser: (socketId) => List.find((user) => user.socketId == socketId, users),
   }
 }
 
@@ -43,36 +52,61 @@ main = () => {
         Server.onDisconnected(
           (ws) => {
             IO.putLine("user disconnected")
-            userStore.removeUser(Server.getSocketId(ws))
+
+            socketId = Server.getSocketId(ws)
+            where(userStore.findUser(socketId)) {
+              Just(found) =>
+                do {
+                  userStore.removeUser(Server.getSocketId(ws))
+                  List.forEach(
+                    (user) => {
+                      pipe(
+                        printUserAccessEvent,
+                        ByteArray.fromString,
+                        Server.send($, user.socket),
+                      )({ eventType: "USER_LEFT", author: found.pseudo, userId: socketId })
+                    },
+                    userStore.getUsers(),
+                  )
+                }
+
+              _ =>
+                userStore.removeUser(Server.getSocketId(ws))
+            }
           },
         ),
         Server.onMessage(
           (ws, data) => pipe(
             ByteArray.toString,
+            IO.cTrace("raw event received:"),
             parseEvent,
             IO.cTrace("event received:"),
             where {
               SignInEvent({ pseudo }) =>
                 do {
-                  userStore.addUser({ pseudo, socketId: Server.getSocketId(ws), socket: ws })
+                  socketId = Server.getSocketId(ws)
+                  List.forEach(
+                    (user) => {
+                      pipe(
+                        printUserAccessEvent,
+                        ByteArray.fromString,
+                        Server.send($, user.socket),
+                      )({ eventType: "USER_JOINED", author: pseudo, userId: socketId })
+                    },
+                    userStore.getUsers(),
+                  )
+
+                  userStore.addUser({ pseudo, socketId, socket: ws })
                   IO.putLine(`${Terminal.text.brightCyan(pseudo)} joined the chatroom`)
                   response = pipe(
-                    Server.getSocketId,
                     printRegisteredEvent,
                     ByteArray.fromString,
-                  )(ws)
+                  )(socketId)
                   Server.send(response, ws)
                 }
 
               MessageEvent(evt) =>
                 List.forEach((user) => Server.send(data, user.socket), userStore.getUsers())
-
-              // List.forEach(
-              //   (user) => if (Server.getSocketId(ws) != user.socketId) {
-              //     Server.send(data, user.socket)
-              //   },
-              //   userStore.getUsers(),
-              // )
 
               _ =>
                 {}

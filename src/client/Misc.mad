@@ -1,31 +1,13 @@
+import Char from "Char"
 import IO from "IO"
+import String from "String"
 
-
-
-#-
-import chat_readline from "readline";
-
-chat_readline.emitKeypressEvents(process.stdin);
-
-if (process.stdin.isTTY) process.stdin.setRawMode(true);
--#
-
-registerKeyPress :: (String -> {}) -> {}
-export registerKeyPress = (cb) => #- {
-  process.stdin.on("keypress", (chunk, key) => {
-    // console.log(key)
-    cb(key.sequence);
-  });
-} -#
 
 saveCursor :: {} -> {}
-export saveCursor = () => IO.put("\x1b7")
+export saveCursor = () => IO.put(String.fromList([Char.fromShort(27), '7']))
 
 restoreCursor :: {} -> {}
-export restoreCursor = () => IO.put("\x1b8")
+export restoreCursor = () => IO.put(String.fromList([Char.fromShort(27), '8']))
 
 eraseAfterCursor :: {} -> {}
 export eraseAfterCursor = () => IO.put("\x1b[0J")
-
-setTimeout :: ({} -> {}) -> Integer -> {}
-export setTimeout = (cb, time) => #- setTimeout(cb, time) -#

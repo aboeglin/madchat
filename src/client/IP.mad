@@ -1,7 +1,0 @@
-#-
-import ip from "ip";
-import { getIPRange } from "get-ip-range";
--#
-
-getSubnetIpRange :: {} -> List String
-export getSubnetIpRange = () => #- __jsArrayToList__(getIPRange(`${ip.address()}/24`)) -#

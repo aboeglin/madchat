@@ -1,0 +1,74 @@
+import type { IpV4 } from "Network"
+import type { Wish } from "Wish"
+
+import List from "List"
+import Maybe from "Maybe"
+import { Just } from "Maybe"
+import { IpV4 } from "Network"
+import Network from "Network"
+import { Wish, raceN, withTimeout } from "Wish"
+
+import WebSocket from "MadWebSocketClient"
+
+
+
+PORT = 3000
+
+ipv4ToString :: IpV4 -> String
+ipv4ToString = (ip) => where(ip) {
+  IpV4(a, b, c, d) =>
+    `${show(a)}.${show(b)}.${show(c)}.${show(d)}`
+}
+
+
+alias ConnectionInfo = { socket :: WebSocket, url :: String }
+
+
+getIps :: {} -> List IpV4
+getIps = () => pipe(
+  chain(.addresses),
+  List.filter((i) => Maybe.isJust(i.ipv4) && !i.isInternal),
+  chain(
+    where {
+      { ipv4: Just(ip), ipv4Mask: Just(mask) } =>
+        pipe(
+          Network.getNetworkInfo(ip),
+          (info) => Network.getIpAddressesInRange(info.firstIp, info.lastIp),
+        )(mask)
+
+      _ =>
+        []
+    },
+  ),
+)(Network.getInterfaces())
+
+
+tryIp :: IpV4 -> Wish {} ConnectionInfo
+tryIp = (ip) => withTimeout(
+  300,
+  {},
+  Wish(
+    (badCB, goodCB) => {
+      url = `ws://${ipv4ToString(ip)}:${show(PORT)}`
+      ws = WebSocket.connect(url)
+
+      WebSocket.onError(
+        () => {
+          WebSocket.disconnect(ws)
+          badCB({})
+        },
+        ws,
+      )
+
+      WebSocket.onConnected(() => { goodCB({ url, socket: ws }) }, ws)
+
+      return () => {
+        WebSocket.cancelConnection(ws)
+      }
+    },
+  ),
+)
+
+
+connect :: {} -> Wish {} ConnectionInfo
+export connect = () => raceN(15, map(tryIp, getIps()))

@@ -1,0 +1,206 @@
+import type { WebSocket } from "MadWebSocketClient"
+
+import ByteArray from "ByteArray"
+import IO from "IO"
+import List from "List"
+import Math from "Math"
+import Maybe from "Maybe"
+import Process from "Process"
+import String from "String"
+import Terminal from "Terminal"
+import { fulfill } from "Wish"
+
+import WebSocket from "MadWebSocketClient"
+
+import Discovery from "./Discovery"
+import { eraseAfterCursor, greyLog, restoreCursor, saveCursor } from "@/client/Misc"
+import {
+  MessageEvent,
+  RegisteredEvent,
+  UserJoinedEvent,
+  UserLeftEvent,
+  parseEvent,
+} from "@/common/Event"
+import { printMessageEvent } from "@/common/Message"
+import { printSignInEvent } from "@/common/SignIn"
+
+
+
+alias Buffer = { get :: {} -> String, pop :: {} -> {}, push :: String -> {}, reset :: {} -> {} }
+
+
+makeBuffer :: {} -> Buffer
+makeBuffer = () => {
+  data = ""
+
+  return {
+    push: (char) => {
+      data = data ++ char
+    },
+    get: () => data,
+    reset: () => {
+      data = ""
+    },
+    pop: () => {
+      data = String.dropLast(1, data)
+    },
+  }
+}
+
+
+sendMessage :: WebSocket -> Buffer -> String -> Integer -> {}
+sendMessage = (ws, buffer, nickname, userId) => {
+  pipe(
+    printMessageEvent,
+    ByteArray.fromString,
+    WebSocket.send($, ws),
+  )({ eventType: "MESSAGE", nickname, content: buffer.get(), userId: userId })
+
+  buffer.reset()
+}
+
+
+eraseOneChar :: Buffer -> {}
+eraseOneChar = (buffer) => {
+  buffer.pop()
+  restoreCursor()
+  eraseAfterCursor()
+  IO.put("> ")
+  IO.put(buffer.get())
+}
+
+
+startPrompt :: WebSocket -> Buffer -> String -> Integer -> {}
+startPrompt = (ws, buffer, nickname, userId) => {
+  IO.enableTTYRawMode()
+  saveCursor()
+  IO.put("> ")
+  IO.onKeyPress(
+    (char) => {
+      if (char == "\r") do {
+        if (buffer.get() != "") {
+          sendMessage(ws, buffer, nickname, userId)
+        }
+      } else if (char == "\x03") do {
+        Process.exit(0)
+      } else if (char == "\x7F") do {
+        eraseOneChar(buffer)
+      } else if (char == "\x1B[A" || char == "\x1B[B" || char == "\x1B[C" || char == "\x1B[D") {
+        {}
+      } else do {
+        IO.put(char)
+        buffer.push(char)
+      }
+    },
+  )
+}
+
+
+AVAILABLE_COLORS :: List (String -> String)
+AVAILABLE_COLORS = [
+  Terminal.text.brightCyan,
+  Terminal.text.green,
+  Terminal.text.brightMagenta,
+  Terminal.text.brightYellow,
+  Terminal.text.cyan,
+  Terminal.text.brightRed,
+  Terminal.text.brightGreen,
+  Terminal.text.brightBlue,
+  Terminal.text.blue,
+  Terminal.text.yellow,
+  Terminal.text.magenta,
+  Terminal.text.red,
+]
+
+
+pickColorById :: Integer -> String -> String
+pickColorById = (id) => pipe(
+  List.length,
+  Math.mod(id),
+  List.nth($, AVAILABLE_COLORS),
+  Maybe.fromMaybe(Terminal.text.brightCyan),
+)(AVAILABLE_COLORS)
+
+
+printMessage :: Buffer -> String -> {}
+printMessage = (buffer, message) => {
+  IO.put("\x07")
+  restoreCursor()
+  IO.putLine(message)
+  saveCursor()
+  IO.put("> ")
+  IO.put(buffer.get())
+}
+
+
+init :: String -> WebSocket -> {}
+init = (name, ws) => {
+  buffer :: Buffer
+  buffer = makeBuffer()
+
+  pipe(
+    (nickname) => ({ nickname, eventType: "SIGN_IN" }),
+    printSignInEvent,
+    ByteArray.fromString,
+    WebSocket.send($, ws),
+  )(name)
+
+  WebSocket.onDisconnected(() => { IO.putLine("Connection lost") }, ws)
+
+  WebSocket.onMessage(
+    pipe(
+      ByteArray.toString,
+      parseEvent,
+      where {
+        RegisteredEvent({ userId }) =>
+          do {
+            greyLog("You are connected!")
+            startPrompt(ws, buffer, name, userId)
+          }
+
+        MessageEvent({ nickname, userId, content }) =>
+          do {
+            colorFn = pickColorById(userId)
+            printMessage(buffer, `${Terminal.text.bold(colorFn(nickname))}: ${content}`)
+          }
+
+        UserJoinedEvent({ nickname, userId }) =>
+          do {
+            colorFn = pickColorById(userId)
+            printMessage(
+              buffer,
+              `${colorFn(nickname)} ${Terminal.text.brightBlack("joined the chatroom")}`,
+            )
+          }
+
+        UserLeftEvent({ nickname, userId }) =>
+          do {
+            colorFn = pickColorById(userId)
+            printMessage(
+              buffer,
+              `${colorFn(nickname)} ${Terminal.text.brightBlack("left the chatroom")}`,
+            )
+          }
+
+        _ =>
+          {}
+      },
+    ),
+    ws,
+  )
+}
+
+
+run :: String -> {}
+export run = (nickname) => {
+  fulfill(
+    () => {
+      greyLog("No server found")
+    },
+    (info) => {
+      greyLog(`Server found: ${info.url}`)
+      init(nickname, info.socket)
+    },
+    Discovery.connect(),
+  )
+}

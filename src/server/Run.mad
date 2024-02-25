@@ -16,15 +16,16 @@ import { printUserAccessEvent } from "../common/UserAccess"
 
 
 
-alias User = { pseudo :: String, socket :: WebSocket, socketId :: Integer }
+alias User = { nickname :: String, socket :: WebSocket, socketId :: Integer }
 
-makeUserStore :: {}
-  -> {
-    addUser :: User -> {},
-    findUser :: Integer -> Maybe User,
-    getUsers :: {} -> List User,
-    removeUser :: Integer -> {},
-  }
+alias UserStore = {
+  addUser :: User -> {},
+  findUser :: Integer -> Maybe User,
+  getUsers :: {} -> List User,
+  removeUser :: Integer -> {},
+}
+
+makeUserStore :: {} -> UserStore
 makeUserStore = () => {
   users = []
 
@@ -40,10 +41,10 @@ makeUserStore = () => {
   }
 }
 
-userStore = makeUserStore()
 
+export run = () => {
+  userStore = makeUserStore()
 
-main = () => {
   pipe(
     Server.create,
     Server.ws(
@@ -64,7 +65,7 @@ main = () => {
                         printUserAccessEvent,
                         ByteArray.fromString,
                         Server.send($, user.socket),
-                      )({ eventType: "USER_LEFT", author: found.pseudo, userId: socketId })
+                      )({ eventType: "USER_LEFT", nickname: found.nickname, userId: socketId })
                     },
                     userStore.getUsers(),
                   )
@@ -78,11 +79,9 @@ main = () => {
         Server.onMessage(
           (ws, data) => pipe(
             ByteArray.toString,
-            IO.cTrace("raw event received:"),
             parseEvent,
-            IO.cTrace("event received:"),
             where {
-              SignInEvent({ pseudo }) =>
+              SignInEvent({ nickname }) =>
                 do {
                   socketId = Server.getSocketId(ws)
                   List.forEach(
@@ -91,13 +90,13 @@ main = () => {
                         printUserAccessEvent,
                         ByteArray.fromString,
                         Server.send($, user.socket),
-                      )({ eventType: "USER_JOINED", author: pseudo, userId: socketId })
+                      )({ eventType: "USER_JOINED", nickname: nickname, userId: socketId })
                     },
                     userStore.getUsers(),
                   )
 
-                  userStore.addUser({ pseudo, socketId, socket: ws })
-                  IO.putLine(`${Terminal.text.brightCyan(pseudo)} joined the chatroom`)
+                  userStore.addUser({ nickname, socketId, socket: ws })
+                  IO.putLine(`${Terminal.text.brightCyan(nickname)} joined the chatroom`)
                   response = pipe(
                     printRegisteredEvent,
                     ByteArray.fromString,
@@ -106,7 +105,10 @@ main = () => {
                 }
 
               MessageEvent(evt) =>
-                List.forEach((user) => Server.send(data, user.socket), userStore.getUsers())
+                do {
+                  IO.putLine(`${Terminal.text.brightCyan(evt.nickname)} sent a message`)
+                  List.forEach((user) => Server.send(data, user.socket), userStore.getUsers())
+                }
 
               _ =>
                 {}

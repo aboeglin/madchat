@@ -1,7 +1,15 @@
 import IO from "IO"
+import Client from "@/client/Run"
+import Server from "@/server/Run"
 
 
+main = (args) => where(args) {
+  [_, "client", nickname] =>
+    Client.run(nickname)
 
-main = () => {
-  IO.putLine("Hello World!")
+  [_, "server"] =>
+    Server.run()
+
+  _ =>
+    IO.putLine("Bad input")
 }

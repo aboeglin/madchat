@@ -1,13 +1,19 @@
-import Char from "Char"
 import IO from "IO"
-import String from "String"
+import Terminal from "Terminal"
+
 
 
 saveCursor :: {} -> {}
-export saveCursor = () => IO.put(String.fromList([Char.fromShort(27), '7']))
+export saveCursor = () => IO.put("\x1b7")
 
 restoreCursor :: {} -> {}
-export restoreCursor = () => IO.put(String.fromList([Char.fromShort(27), '8']))
+export restoreCursor = () => IO.put("\x1b8")
 
 eraseAfterCursor :: {} -> {}
 export eraseAfterCursor = () => IO.put("\x1b[0J")
+
+greyLog :: String -> {}
+export greyLog = (msg) => pipe(
+    Terminal.text.brightBlack,
+    IO.putLine,
+  )(msg)

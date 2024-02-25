@@ -63,7 +63,7 @@ tryIp = (ip) => withTimeout(
       WebSocket.onConnected(() => { goodCB({ url, socket: ws }) }, ws)
 
       return () => {
-        WebSocket.cancelConnection(ws)
+        WebSocket.disconnect(ws)
       }
     },
   ),
@@ -71,4 +71,4 @@ tryIp = (ip) => withTimeout(
 
 
 connect :: {} -> Wish {} ConnectionInfo
-export connect = () => raceN(15, map(tryIp, getIps()))
+export connect = () => raceN(5, map(tryIp, getIps()))

@@ -72,10 +72,10 @@ eraseOneChar = (buffer) => {
 
 startPrompt :: WebSocket -> Buffer -> String -> Integer -> {}
 startPrompt = (ws, buffer, nickname, userId) => {
-  IO.enableTTYRawMode()
+  Terminal.enableTTYRawMode()
   saveCursor()
   IO.put("> ")
-  IO.onKeyPress(
+  Terminal.onKeyPressed(
     (char) => {
       if (char == "\r") do {
         if (buffer.get() != "") {
